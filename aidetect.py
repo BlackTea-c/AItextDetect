@@ -5,13 +5,8 @@ import gc
 #基于Tfidf
 
 import pandas as pd
-from sklearn.model_selection import StratifiedKFold
-import numpy as np
-from sklearn.metrics import roc_auc_score
-import numpy as np
 from lightgbm import LGBMClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.feature_extraction.text import CountVectorizer
 
 from tokenizers import (
     decoders,
