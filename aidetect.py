@@ -52,8 +52,9 @@ train = train.drop_duplicates(subset=['text'])
 train.reset_index(drop=True, inplace=True)
 
 
-LOWERCASE = False
-VOCAB_SIZE = 30522
+#训练一下分词器
+LOWERCASE = False  #不转换为小写
+VOCAB_SIZE = 30522  #默认即可
 
 raw_tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
 raw_tokenizer.normalizer = normalizers.Sequence([normalizers.NFC()] + [normalizers.Lowercase()] if LOWERCASE else [])
@@ -81,6 +82,7 @@ tokenized_texts_test = []
 for text in tqdm(test['text'].tolist()):
     tokenized_texts_test.append(tokenizer.tokenize(text))
 
+
 tokenized_texts_train = []
 
 for text in tqdm(train['text'].tolist()):
@@ -104,7 +106,7 @@ def func(tokenized_texts_train, tokenized_texts_test):
 总的来说，创建两个 TF-IDF 向量化器的目的是为了确保训练数据和测试数据在特征表示时使用了相同的词汇表，从而避免了词汇表不一致带来的问题。'''
     def dummy(text):
         return text
-    # n-gram 特征的范围设置为3-5
+    # n-gram 特征的范围设置为3-5，意思就是采取连续的3-5词
     vectorizer = TfidfVectorizer(ngram_range=(3, 5), lowercase=False, sublinear_tf=True, analyzer = 'word',
                                 tokenizer = dummy,
                                 preprocessor = dummy,
@@ -123,7 +125,7 @@ def func(tokenized_texts_train, tokenized_texts_test):
     tf_train = vectorizer.fit_transform(tokenized_texts_train)
     tf_test = vectorizer.transform(tokenized_texts_test)
 
-    del vectorizer
+    del vectorizer #删除释放内存.
     gc.collect()
     return tf_train, tf_test
 
@@ -132,16 +134,17 @@ y_train = train['label'].values
 
 
 def get_model():
-    from catboost import CatBoostClassifier
+    #from catboost import CatBoostClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.svm import LinearSVC
     from sklearn.calibration import CalibratedClassifierCV
     from sklearn.naive_bayes import ComplementNB
+    #基本分类器
     clf = MultinomialNB(alpha=0.02)
     cnb = ComplementNB(alpha=0.02)
     lr_svc = CalibratedClassifierCV(LinearSVC(max_iter=8000, loss='hinge', tol=1e-4))
     sgd_model = SGDClassifier(max_iter=8000, tol=1e-4, loss="modified_huber")
-    p6 = {
+    para = {
         'n_iter': 1500,
         'verbose': -1,
         'objective': 'binary',
@@ -154,8 +157,8 @@ def get_model():
         'min_data_in_leaf': 115,
         'max_depth': 23,
         'max_bin': 898
-    }
-    lgb = LGBMClassifier(**p6)
+    }#配置lgb的参数
+    lgb = LGBMClassifier(**para)
 
     weights = [0.05, 0.05, 0.25, 0.25, 0.4]
 
@@ -170,10 +173,11 @@ def get_model():
 
 
 
-model = get_model()
-tf_train, tf_test = func(tokenized_texts_train, tokenized_texts_test)
+model = get_model() #分类器
+
+tf_train, tf_test = func(tokenized_texts_train, tokenized_texts_test) #
 print('tf_train:',tf_train)
-model.fit(tf_train, y_train)
+model.fit(tf_train, y_train) #TDFIFD提取的特征进行训练
 gc.collect()
 final_preds = model.predict_proba(tf_test)[:,1]
 
