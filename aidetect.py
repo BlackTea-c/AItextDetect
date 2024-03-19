@@ -1,6 +1,9 @@
 import sys
 import gc
 
+
+#基于Tfidf
+
 import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 import numpy as np
@@ -18,7 +21,7 @@ from tokenizers import (
     processors,
     trainers,
     Tokenizer,
-)
+)   #分词处理
 
 from datasets import Dataset
 from tqdm.auto import tqdm
@@ -26,7 +29,7 @@ from transformers import PreTrainedTokenizerFast
 
 from sklearn.linear_model import SGDClassifier
 from sklearn.naive_bayes import MultinomialNB
-from sklearn.ensemble import VotingClassifier
+from sklearn.ensemble import VotingClassifier  #分类器结果整合
 
 
 test = pd.read_csv('test_essays.csv')
@@ -43,12 +46,13 @@ d_1['label'] = 1
 d_1.rename(columns={'source_text':'text'}, inplace=True)
 e_1 = pd.concat([d_0, d_1], ignore_index=True)
 data_set = [e_1,]
-external_train = pd.concat([e_1,], ignore_index=True)
+external_train = pd.concat([e_1,], ignore_index=True) #额外训练
 
 
 
 
 train = train[['text','label']]
+print(train)
 train = train.drop_duplicates(subset=['text'])
 train.reset_index(drop=True, inplace=True)
 
@@ -59,17 +63,16 @@ VOCAB_SIZE = 30522
 raw_tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
 raw_tokenizer.normalizer = normalizers.Sequence([normalizers.NFC()] + [normalizers.Lowercase()] if LOWERCASE else [])
 raw_tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel()
-special_tokens = ["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]"]
-trainer = trainers.BpeTrainer(vocab_size=VOCAB_SIZE, special_tokens=special_tokens)
+trainer = trainers.BpeTrainer(vocab_size=VOCAB_SIZE, special_tokens=["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]"])
 dataset = Dataset.from_pandas(test[['text']])
-
+print('dataset:',dataset)
 
 def train_corp_iter():
     for i in range(0, len(dataset), 1000):
-        yield dataset[i: i + 1000]["text"]
+        yield dataset[i: i + 1000]["text"]  #训练分词器的时候逐步提供数据而不是一次性
 
 
-raw_tokenizer.train_from_iterator(train_corp_iter(), trainer=trainer)
+raw_tokenizer.train_from_iterator(train_corp_iter(), trainer=trainer) #训练分词器
 tokenizer = PreTrainedTokenizerFast(
     tokenizer_object=raw_tokenizer,
     unk_token="[UNK]",
@@ -92,12 +95,21 @@ for text in tqdm(train['text'].tolist()):
 tokenized_texts_external = []
 for text in tqdm(external_train['text'].tolist()):
     tokenized_texts_external.append(tokenizer.tokenize(text))
-
+#print('分词:')
+#print(tokenized_texts_test)
+#print(tokenized_texts_external)
 
 
 def func(tokenized_texts_train, tokenized_texts_test):
+    '''第一个 TF-IDF 向量化器的目的是为了获取测试数据集中出现的所有词汇，并建立词汇表。这样做是为了确保训练数据和测试数据使用了相同的词汇表，
+    从而避免了在测试阶段出现未知词汇的情况。在实际应用中，测试数据通常是未知的，我们不能将测试数据提前放入训练阶段，
+    因此需要单独拟合一个 TF-IDF 向量化器来获取测试数据的词汇表。
+而第二个 TF-IDF 向量化器则直接使用第一个向量化器获取的词汇表，以确保训练数据和测试数据使用相同的词汇表进行特征表示，
+从而保持一致性。
+总的来说，创建两个 TF-IDF 向量化器的目的是为了确保训练数据和测试数据在特征表示时使用了相同的词汇表，从而避免了词汇表不一致带来的问题。'''
     def dummy(text):
         return text
+    # n-gram 特征的范围设置为3-5
     vectorizer = TfidfVectorizer(ngram_range=(3, 5), lowercase=False, sublinear_tf=True, analyzer = 'word',
                                 tokenizer = dummy,
                                 preprocessor = dummy,
@@ -105,7 +117,7 @@ def func(tokenized_texts_train, tokenized_texts_test):
                             )
 
     vectorizer.fit(tokenized_texts_test)
-    vocab = vectorizer.vocabulary_
+    vocab = vectorizer.vocabulary_  #词汇表
     vectorizer = TfidfVectorizer(ngram_range=(3, 5), lowercase=False, sublinear_tf=True, vocabulary=vocab,
                                 analyzer = 'word',
                                 tokenizer = dummy,
@@ -165,6 +177,7 @@ def get_model():
 
 model = get_model()
 tf_train, tf_test = func(tokenized_texts_train, tokenized_texts_test)
+print('tf_train:',tf_train)
 model.fit(tf_train, y_train)
 gc.collect()
 final_preds = model.predict_proba(tf_test)[:,1]
@@ -189,5 +202,5 @@ print(final_preds_2)
 
 final_preds = ((final_preds - final_preds.min()) / (final_preds.max() - final_preds.min()))
 final_preds_2 = ((final_preds_2 - final_preds_2.min()) / (final_preds_2.max() - final_preds_2.min()))
-sub['generated'] = 0.6 * final_preds + 0.4 * final_preds_2
+sub['generated'] = 0.7 * final_preds + 0.3 * final_preds_2  #主体是v2_drcat  额外训练数据external_data
 sub.to_csv('submission.csv', index=False)
